@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1e2226">
+<title>Contador de objetos</title>
+<style>
+:root{--asfalto:#1e2226;--painel:#2a3036;--linha:#3b434b;--tinta:#f2f0e8;--suave:#a9b0b6;--amarelo:#ffc933}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--asfalto);color:var(--tinta);
+  font-family:"Arial Narrow","Roboto Condensed",system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+#app{height:100%;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
+#stage{position:relative;flex:1;min-height:0;background:#000;overflow:hidden}
+#v,#c{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+  padding:24px;font-size:1.15rem;line-height:1.4;color:var(--suave);background:rgba(0,0,0,.35);pointer-events:none}
+#msg.off{display:none} #msg.err{color:#ffb4a2}
+#tally{display:grid;background:var(--painel);border-top:3px solid var(--amarelo)}
+.t{padding:10px 8px 8px;text-align:center;border-right:1px solid var(--linha)}
+.t:last-child{border-right:0}
+.t b{display:block;font-size:clamp(2.4rem,13vw,4.2rem);line-height:1;font-weight:700;font-variant-numeric:tabular-nums;color:var(--c)}
+.t span{font-size:1rem;color:var(--suave)}
+.t.bump b{animation:bump .25s ease-out}
+@keyframes bump{40%{transform:scale(1.18)}}
+#ctl{background:var(--painel);padding:10px 14px calc(12px + env(safe-area-inset-bottom,0px));display:grid;gap:10px;max-height:46dvh;overflow:auto}
+.row{display:flex;gap:8px}
+button{font:inherit;font-size:1.05rem;color:var(--tinta);background:var(--asfalto);border:1px solid var(--linha);
+  border-radius:8px;padding:12px 10px;flex:1;cursor:pointer;touch-action:manipulation}
+button:active{transform:translateY(1px)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--amarelo);outline-offset:2px}
+button.go{background:var(--amarelo);color:#1a1500;border-color:var(--amarelo);font-weight:700;flex:2}
+button.go.on{background:#e5534b;border-color:#e5534b;color:#fff}
+.sel{border-color:var(--amarelo)!important;color:var(--amarelo)}
+#chips{display:flex;flex-wrap:wrap;gap:6px}
+#chips button{flex:0 0 auto;padding:8px 12px;font-size:.98rem;border-radius:999px}
+label{display:grid;grid-template-columns:9.5rem 1fr 3rem;align-items:center;gap:8px;color:var(--suave);font-size:1rem}
+output{text-align:right;color:var(--tinta);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--amarelo);height:28px}
+#hint{font-size:.9rem;color:var(--suave);text-align:center}
+.hide{display:none!important}
+@media (min-width:820px){#app{flex-direction:row}#side{width:400px;display:flex;flex-direction:column;justify-content:flex-end}#ctl{max-height:none}}
+@media (prefers-reduced-motion:reduce){.t.bump b{animation:none}}
+#qrbox{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(10,12,14,.82);z-index:10}
+#qrbox.open{display:flex}
+#qrcard{background:var(--tinta);color:#1a1d20;border-radius:12px;padding:20px;max-width:340px;width:100%;text-align:center;display:grid;gap:12px}
+#qrimg svg{width:100%;height:auto;display:block}
+#qrcard p{font-size:1.05rem;line-height:1.35}
+#qrurl{font-size:.8rem;word-break:break-all;color:#555}
+#qrcard button{background:#1a1d20;color:var(--tinta);border-color:#1a1d20}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <video id="v" playsinline muted autoplay></video>
+    <canvas id="c"></canvas>
+    <div id="msg">Escolha o objeto, aponte a câmera e toque em Iniciar.</div>
+  </div>
+  <div id="side">
+    <div id="tally" aria-live="polite"></div>
+    <div id="ctl">
+      <div class="row">
+        <button class="go" id="go">Iniciar</button>
+        <button id="reset">Zerar</button>
+        <button id="csv">CSV</button>
+        <button id="qr">QR celular</button>
+      </div>
+      <div id="chips" role="group" aria-label="Objetos a contar"></div>
+      <div class="row">
+        <button id="mlive" class="sel">Na tela agora</button>
+        <button id="mline">Cruzando a linha</button>
+      </div>
+      <div id="lineopts" class="hide" style="display:grid;gap:10px">
+        <div class="row">
+          <button id="oh" class="sel">Linha horizontal</button>
+          <button id="ov">Linha vertical</button>
+        </div>
+        <label>Posição da linha <input type="range" id="pos" min="10" max="90" value="55"><output id="posv">55%</output></label>
+      </div>
+      <label>Confiança mínima <input type="range" id="conf" min="25" max="90" value="40"><output id="confv">40%</output></label>
+      <div id="hint"></div>
+    </div>
+  </div>
+</div>
+
+<div id="qrbox" role="dialog" aria-label="QR Code para o celular">
+  <div id="qrcard">
+    <div id="qrimg"></div>
+    <p id="qrtxt"></p>
+    <div id="qrurl"></div>
+    <button id="qrclose">Fechar</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const video = $('v'), cv = $('c'), ctx = cv.getContext('2d');
+const CLS = { cup:'Copo', bottle:'Garrafa', bowl:'Tigela', person:'Pessoa', 'cell phone':'Celular', book:'Livro',
+  apple:'Maçã', banana:'Banana', orange:'Laranja', car:'Carro', motorcycle:'Moto', bus:'Ônibus', truck:'Caminhão', bicycle:'Bicicleta' };
+const KEYS = Object.keys(CLS);
+const PAL = ['#4da3ff','#ff7a45','#9fc9a8','#ffc933','#c792ea','#ff6b9a','#5ee0d0'];
+const color = c => PAL[KEYS.indexOf(c) % PAL.length];
+const eid = c => c.replace(' ', '_');
+
+const sel = new Set(['cup']);
+const counts = {}, live = {};
+let hist = [], tracks = [], nextId = 1, log = [], flashUntil = 0;
+let model = null, stream = null, wake = null, running = false;
+let mode = 'live', orient = 'h', linePos = 0.55, minScore = 0.4;
+
+function say(t, err){ const m = $('msg'); m.textContent = t; m.className = err ? 'err' : ''; }
+
+function renderChips(){
+  $('chips').innerHTML = KEYS.map(c => `<button data-c="${c}" class="${sel.has(c) ? 'sel' : ''}">${CLS[c]}</button>`).join('');
+  $('chips').querySelectorAll('button').forEach(b => b.onclick = () => {
+    const c = b.dataset.c;
+    if(sel.has(c)){ if(sel.size === 1) return; sel.delete(c); } else sel.add(c);
+    tracks = []; hist = [];
+    renderChips(); renderTally();
+  });
+}
+function renderTally(){
+  const el = $('tally');
+  el.style.gridTemplateColumns = `repeat(${Math.min(sel.size, 3)},1fr)`;
+  el.innerHTML = [...sel].map(c => `<div class="t" id="t-${eid(c)}" style="--c:${color(c)}"><b id="n-${eid(c)}">0</b><span>${CLS[c]}</span></div>`).join('');
+  refreshNums();
+}
+function refreshNums(){
+  for(const c of sel){ const e = $('n-' + eid(c)); if(e) e.textContent = (mode === 'live' ? live[c] : counts[c]) || 0; }
+}
+function setMode(m){
+  mode = m; tracks = []; hist = [];
+  $('mlive').classList.toggle('sel', m === 'live');
+  $('mline').classList.toggle('sel', m === 'line');
+  $('lineopts').classList.toggle('hide', m !== 'line');
+  $('hint').textContent = m === 'live'
+    ? 'Mostra quantos objetos aparecem na câmera neste momento.'
+    : 'Soma cada objeto uma vez, quando ele cruza a linha amarela.';
+  refreshNums();
+}
+
+async function start(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    say('A câmera só funciona em página HTTPS. Hospede este arquivo (Netlify, GitHub Pages ou Vercel) e abra o link no celular.', true); return;
+  }
+  try{
+    say('Abrindo a câmera…');
+    stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } }, audio:false });
+    video.srcObject = stream; await video.play();
+    cv.width = video.videoWidth; cv.height = video.videoHeight;
+  }catch(e){ say('Não consegui abrir a câmera. Permita o acesso no navegador e tente de novo.', true); return; }
+  if(!model){
+    say('Carregando o modelo de detecção (só na primeira vez)…');
+    try{ model = await cocoSsd.load({ base:'lite_mobilenet_v2' }); }
+    catch(e){ say('Falha ao baixar o modelo. Verifique a internet e tente de novo.', true); stop(); return; }
+  }
+  try{ if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); }catch(e){}
+  $('msg').className = 'off';
+  running = true; $('go').textContent = 'Parar'; $('go').classList.add('on');
+  loop();
+}
+function stop(){
+  running = false;
+  if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if(wake){ try{ wake.release(); }catch(e){} wake = null; }
+  tracks = []; ctx.clearRect(0, 0, cv.width, cv.height);
+  $('go').textContent = 'Iniciar'; $('go').classList.remove('on');
+  say('Pausado. Os números foram mantidos.');
+}
+
+async function loop(){
+  if(!running) return;
+  try{
+    const preds = await model.detect(video, 30);
+    const dets = [];
+    for(const p of preds){
+      if(!sel.has(p.class) || p.score < minScore) continue;
+      const [x, y, w, h] = p.bbox;
+      dets.push({ cls:p.class, box:[x, y, w, h], cx:x + w/2, cy:y + h/2 });
+    }
+    update(dets); updateLive(dets); draw();
+  }catch(e){}
+  requestAnimationFrame(loop);
+}
+
+function updateLive(dets){
+  const now = {}; for(const c of sel) now[c] = 0;
+  dets.forEach(d => now[d.cls]++);
+  hist.push(now); if(hist.length > 5) hist.shift();
+  for(const c of sel){
+    const v = hist.map(h => h[c] || 0).sort((a, b) => a - b);
+    live[c] = v[Math.floor(v.length / 2)];
+  }
+  if(mode === 'live') refreshNums();
+}
+
+function side(cx, cy){ return orient === 'h' ? cy - linePos * cv.height : cx - linePos * cv.width; }
+
+function update(dets){
+  const maxD = Math.max(cv.width, cv.height) * 0.18, used = new Set();
+  for(const t of tracks){
+    let bi = -1, bd = maxD;
+    dets.forEach((d, i) => {
+      if(used.has(i) || d.cls !== t.cls) return;
+      const k = Math.hypot(d.cx - t.cx, d.cy - t.cy);
+      if(k < bd){ bd = k; bi = i; }
+    });
+    if(bi >= 0){
+      used.add(bi);
+      const d = dets[bi], before = side(t.cx, t.cy);
+      t.cx = d.cx; t.cy = d.cy; t.box = d.box; t.miss = 0; t.hits++;
+      const after = side(t.cx, t.cy);
+      if(mode === 'line' && !t.counted && t.hits >= 2 && before * after < 0) register(t, after > 0 ? 1 : -1);
+    }else t.miss++;
+  }
+  dets.forEach((d, i) => { if(!used.has(i)) tracks.push({ id:nextId++, cls:d.cls, cx:d.cx, cy:d.cy, box:d.box, miss:0, hits:1, counted:false }); });
+  tracks = tracks.filter(t => t.miss <= 10);
+}
+
+function register(t, dir){
+  t.counted = true;
+  counts[t.cls] = (counts[t.cls] || 0) + 1;
+  refreshNums();
+  const el = $('t-' + eid(t.cls));
+  if(el){ el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
+  flashUntil = performance.now() + 300;
+  if(navigator.vibrate) navigator.vibrate(30);
+  const sentido = orient === 'h' ? (dir > 0 ? 'para baixo' : 'para cima') : (dir > 0 ? 'para a direita' : 'para a esquerda');
+  log.push({ hora:new Date().toLocaleString('pt-BR'), obj:CLS[t.cls], sentido });
+}
+
+function draw(){
+  const W = cv.width, H = cv.height, u = Math.max(2, W / 320), fh = Math.max(13, W / 48);
+  ctx.clearRect(0, 0, W, H);
+  if(mode === 'line'){
+    ctx.lineWidth = u * 1.6; ctx.setLineDash([u * 7, u * 4]);
+    ctx.strokeStyle = performance.now() < flashUntil ? '#fff' : '#ffc933';
+    ctx.beginPath();
+    if(orient === 'h'){ ctx.moveTo(0, linePos * H); ctx.lineTo(W, linePos * H); }
+    else { ctx.moveTo(linePos * W, 0); ctx.lineTo(linePos * W, H); }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.font = `700 ${fh}px sans-serif`; ctx.textBaseline = 'top';
+  for(const t of tracks){
+    if(t.miss > 0) continue;
+    const [x, y, w, h] = t.box, col = color(t.cls);
+    ctx.globalAlpha = t.counted ? .55 : 1;
+    ctx.strokeStyle = col; ctx.lineWidth = u * 1.6; ctx.strokeRect(x, y, w, h);
+    const label = CLS[t.cls] + (mode === 'line' ? ' #' + t.id : ''), pad = u * 2, tw = ctx.measureText(label).width, ly = Math.max(0, y - fh - pad * 2);
+    ctx.fillStyle = col; ctx.fillRect(x, ly, tw + pad * 2, fh + pad * 2);
+    ctx.fillStyle = '#101418'; ctx.fillText(label, x + pad, ly + pad);
+    ctx.globalAlpha = 1;
+  }
+}
+
+$('go').onclick = () => running ? stop() : start();
+$('reset').onclick = () => {
+  if(!confirm('Zerar todas as contagens?')) return;
+  for(const k in counts) delete counts[k];
+  log = []; tracks = []; refreshNums();
+};
+$('csv').onclick = () => {
+  if(!log.length){ alert('O CSV guarda as passagens do modo "Cruzando a linha". Ainda não há nenhuma.'); return; }
+  const rows = ['hora;objeto;sentido', ...log.map(r => `${r.hora};${r.obj};${r.sentido}`)];
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.join('\n')], { type:'text/csv;charset=utf-8' }));
+  a.download = 'contagem-objetos.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+};
+$('qr').onclick = () => {
+  const url = location.href.split('#')[0];
+  const web = location.protocol === 'https:' || location.protocol === 'http:';
+  const local = /^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname);
+  $('qrimg').innerHTML = ''; $('qrurl').textContent = '';
+  if(!web || local){
+    $('qrtxt').textContent = 'Para gerar o QR, abra esta página pelo link HTTPS onde ela está hospedada (Netlify, GitHub Pages ou Vercel). Neste endereço o celular não consegue acessar.';
+  }else{
+    try{
+      const q = qrcode(0, 'M'); q.addData(url); q.make();
+      $('qrimg').innerHTML = q.createSvgTag({ cellSize:6, margin:2, scalable:true });
+      $('qrtxt').textContent = 'Escaneie com a câmera do celular para abrir o contador.';
+      $('qrurl').textContent = url;
+    }catch(e){ $('qrtxt').textContent = 'Não consegui gerar o QR. Verifique a internet e tente de novo.'; $('qrurl').textContent = url; }
+  }
+  $('qrbox').classList.add('open');
+};
+$('qrclose').onclick = () => $('qrbox').classList.remove('open');
+$('qrbox').onclick = e => { if(e.target === $('qrbox')) $('qrbox').classList.remove('open'); };
+$('mlive').onclick = () => setMode('live');
+$('mline').onclick = () => setMode('line');
+$('oh').onclick = () => { orient = 'h'; $('oh').classList.add('sel'); $('ov').classList.remove('sel'); };
+$('ov').onclick = () => { orient = 'v'; $('ov').classList.add('sel'); $('oh').classList.remove('sel'); };
+$('pos').oninput = e => { linePos = e.target.value / 100; $('posv').textContent = e.target.value + '%'; };
+$('conf').oninput = e => { minScore = e.target.value / 100; $('confv').textContent = e.target.value + '%'; };
+document.addEventListener('visibilitychange', async () => {
+  if(document.visibilityState === 'visible' && running){ try{ if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); }catch(e){} }
+});
+
+renderChips(); renderTally(); setMode('live');
+</script>
+</body>
+</html>
